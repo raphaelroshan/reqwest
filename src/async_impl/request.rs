@@ -366,17 +366,22 @@ impl RequestBuilder {
     pub fn query<T: Serialize + ?Sized>(mut self, query: &T) -> RequestBuilder {
         let mut error = None;
         if let Ok(ref mut req) = self.request {
-            let url = req.url_mut();
-            let mut pairs = url.query_pairs_mut();
-            let serializer = serde_urlencoded::Serializer::new(&mut pairs);
-
-            if let Err(err) = query.serialize(serializer) {
-                error = Some(crate::error::builder(err));
-            }
-        }
-        if let Ok(ref mut req) = self.request {
-            if let Some("") = req.url().query() {
-                req.url_mut().set_query(None);
+            match serde_urlencoded::to_string(query) {
+                // `serde_urlencoded` form-encodes spaces as `+`, but a URL query is
+                // not a form, so rewrite them as `%20`. This is safe because a literal
+                // `+` is encoded as `%2B`, so any remaining `+` is always a space.
+                Ok(query) => {
+                    let query = query.replace('+', "%20");
+                    if !query.is_empty() {
+                        let url = req.url_mut();
+                        let prefix = match url.query() {
+                            Some(existing) if !existing.is_empty() => format!("{existing}&"),
+                            _ => String::new(),
+                        };
+                        url.set_query(Some(&format!("{prefix}{query}")));
+                    }
+                }
+                Err(err) => error = Some(crate::error::builder(err)),
             }
         }
         if let Some(err) = error {
@@ -759,6 +764,32 @@ mod tests {
         assert_eq!(foo.len(), 2);
         assert_eq!(foo[0], "bar");
         assert_eq!(foo[1], "baz");
+    }
+
+    #[test]
+    #[cfg(feature = "query")]
+    fn add_query_percent_encodes_space() {
+        let client = Client::new();
+        let some_url = "https://google.com/";
+        let r = client.get(some_url);
+
+        let r = r.query(&[("foo", "a b"), ("baz", "x+y")]);
+
+        let req = r.build().expect("request is valid");
+        assert_eq!(req.url().query(), Some("foo=a%20b&baz=x%2By"));
+    }
+
+    #[test]
+    #[cfg(feature = "query")]
+    fn add_query_preserves_existing_query() {
+        let client = Client::new();
+        let some_url = "https://google.com/?keep=1";
+        let r = client.get(some_url);
+
+        let r = r.query(&[("foo", "bar")]);
+
+        let req = r.build().expect("request is valid");
+        assert_eq!(req.url().query(), Some("keep=1&foo=bar"));
     }
 
     #[test]
