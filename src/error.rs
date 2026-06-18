@@ -123,6 +123,11 @@ impl Error {
             if err.is::<TimedOut>() {
                 return true;
             }
+            if let Some(err) = err.downcast_ref::<Error>() {
+                if err.is_timeout() {
+                    return true;
+                }
+            }
             #[cfg(not(all(
                 target_arch = "wasm32",
                 any(target_os = "unknown", target_os = "none")
@@ -498,6 +503,23 @@ mod tests {
             Kind::Decode => (),
             _ => panic!("{err:?}"),
         }
+    }
+
+    #[test]
+    fn decode_body_timeout_is_timeout() {
+        // A body timeout surfaced while decoding stays a decode error, but
+        // is_timeout still finds the timeout in the source chain.
+        let err = super::decode(super::body(super::TimedOut));
+        assert!(err.is_decode());
+        assert!(err.is_timeout());
+    }
+
+    #[test]
+    fn decode_wraps_other_errors() {
+        let io = io::Error::new(io::ErrorKind::Other, "boom");
+        let err = super::decode(io);
+        assert!(err.is_decode());
+        assert!(!err.is_timeout());
     }
 
     #[test]
