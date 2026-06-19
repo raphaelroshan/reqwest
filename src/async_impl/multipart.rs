@@ -588,15 +588,15 @@ impl PercentEncoding {
     }
 }
 
+// RFC 2046 §5.1.1 specifies that the boundary must be at most 70 characters.
 fn gen_boundary() -> String {
     use crate::util::fast_random as random;
 
     let a = random();
     let b = random();
     let c = random();
-    let d = random();
 
-    format!("{a:016x}-{b:016x}-{c:016x}-{d:016x}")
+    format!("{a:016x}-{b:016x}-{c:016x}")
 }
 
 #[cfg(test)]
@@ -620,6 +620,19 @@ mod tests {
 
         let out = rt.block_on(s);
         assert!(out.unwrap().is_empty());
+    }
+
+    #[test]
+    fn boundary_length_rfc2046() {
+        for _ in 0..100 {
+            let boundary = gen_boundary();
+            assert!(
+                boundary.len() <= 70,
+                "boundary length {} exceeds RFC 2046 limit of 70: {:?}",
+                boundary.len(),
+                boundary,
+            );
+        }
     }
 
     #[test]
